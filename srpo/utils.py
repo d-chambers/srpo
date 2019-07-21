@@ -1,10 +1,11 @@
 """
 Utilities for srpo.
 """
+import sys
 from functools import wraps
 from pathlib import Path
 
-from rpyc.core.service import Service
+from rpyc.core.service import ClassicService, Service
 from sqlitedict import SqliteDict
 
 STATE = dict(
@@ -91,33 +92,44 @@ def _wrap_entity(obj, name):
 def _create_srpo_service(obj, proxy_registry):
     """ Create a rpyc service from object. """
 
-    sacred_attrs = {"on_connect", "on_disconnect"}
-    dir_set = set(dir(obj))
-    assert (
-        not sacred_attrs & dir_set
-    ), f"object must not have attributes named: {sacred_attrs}"
+    #
+    # sacred_attrs = {"on_connect", "on_disconnect"}
+    # dir_set = set(dir(obj))
+    # assert (
+    #     not sacred_attrs & dir_set
+    # ), f"object must not have attributes named: {sacred_attrs}"
+    #
+    # # add connection and disconnection logic
+    # def on_connect(self, conn):
+    #     # register the proxy
+    #     import remote_pdb;
+    #     remote_pdb.set_trace('127.0.0.1', 8886)
+    #     pass
+    #
+    # def on_disconnect(self, conn):
+    #     # deregister the proxy
+    #     # shutdown the server if no proxies are using it
+    #     pass
+    #
+    # # wrap all attr/methods
+    # attr_dict = {i: _wrap_entity(obj, i) for i in dir_set if not i.startswith('_')}
+    # attr_dict["on_connect"] = on_connect
+    # attr_dict["on_disconnect"] = on_disconnect
+    #
+    # def bob():
+    #     print('bob')
+    #
+    # # create server, register service and start
+    #
+    # di = {'get': _wrap_entity(obj, 'get')}
+    # cls = type("MyService", (ClassicService,), di) #attr_dict)
 
-    # add connection and disconnection logic
-    def on_connect(self, conn):
-        # register the proxy
-        import remote_pdb;
-        remote_pdb.set_trace('127.0.0.1', 8886)
-        pass
+    # return cls
 
-    def on_disconnect(self, conn):
-        # deregister the proxy
-        # shutdown the server if no proxies are using it
-        pass
+    class ProxyService(Service):
+        _proxies = set()
+        _proxy_id = None
 
-    # wrap all attr/methods
-    attr_dict = {i: _wrap_entity(obj, i) for i in dir_set}
-    attr_dict["on_connect"] = on_connect
-    attr_dict["on_disconnect"] = on_disconnect
-
-    # create server, register service and start
-    # return type("MyService", (Service,), attr_dict)
-
-    class SimpleService(Service):
         def on_connect(self, conn):
             # register the proxy
             pass
@@ -127,9 +139,40 @@ def _create_srpo_service(obj, proxy_registry):
             # shutdown the server if no proxies are using it
             pass
 
-        def bobit_all(self):
-            return {'hey', 'ellie'}
+        # any attributes should be just passed to obj
+        def __getattr__(self, item):
+            return getattr(obj, item)
 
-        art = 'Nope'
+        # set get attrs
+        def __getitem__(self, item):
+            return obj[item]
 
-    return SimpleService
+        def __setitem__(self, item, value):
+            obj[item] = value
+
+        def __iter__(self):
+            return iter(obj)
+
+        def __len__(self):
+            return len(obj)
+
+        def __str__(self):
+            return str(self)
+
+        def register_proxy(self, proxy_id):
+            self._proxies.add(proxy_id)
+
+        def deregister_proxy(self, proxy_id):
+            try:
+                self._proxies.remove(proxy_id)
+            except TypeError:
+                pass
+            # if no registered proxies shutdown server
+            if not len(self._proxies):
+                sys.exit(0)
+
+        def __del__(self):
+            if self._proxy_id:
+                self.deregister_proxy(self._proxy_id)
+
+    return ProxyService

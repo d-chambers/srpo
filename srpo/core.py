@@ -97,13 +97,13 @@ def get_proxy(name: str):
     ----------
     name
         The name of the transcended object.
-
-    Returns
-    -------
-
     """
     server_registry = get_registry('server')
     assert name in server_registry
     host, port, _ = server_registry[name]
-    # try to connect, return proxy
-    return rpyc.connect(host, port).root
+    # try to connect, register this end of proxy, return proxy
+    proxy = rpyc.connect(host, port).root
+    proxy_id = (id(proxy), psutil.Process().pid)
+    proxy.register_proxy(proxy_id)
+    breakpoint()
+    return proxy
