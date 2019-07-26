@@ -4,20 +4,33 @@ Core module of srpo.
 import multiprocessing
 import os
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 import psutil
 import rpyc
 from rpyc.utils.server import ThreadPoolServer
 from sqlitedict import SqliteDict
 
-from srpo.utils import _create_srpo_service, get_registry
+from srpo.utils import (
+    _create_srpo_service,
+    get_registry,
+    SrpoProxy,
+    get_current_registry_path,
+)
 
 # enable pickling in rpyc, 'cause living on the edge is the only way to live
 rpyc.core.protocol.DEFAULT_CONFIG["allow_pickle"] = True
 
 
-def transcend(obj: Any, name: str, server_threads=1, port=0, remote=True) -> None:
+def transcend(
+    obj: Any,
+    name: str,
+    server_threads=1,
+    port=0,
+    remote=True,
+    registry_path: Optional[str] = None,
+) -> SrpoProxy:
     """
     Transcend an object to its own process.
 
@@ -30,33 +43,35 @@ def transcend(obj: Any, name: str, server_threads=1, port=0, remote=True) -> Non
     name
         A string identifier so other processes can find the object.
     """
-    # name is already in use; just bail out
-    server_registry = get_registry("server")
-    proxy_registry = get_registry("proxy")
+    # name is already in use; just bail out and return proxy to it
+    registry_path = registry_path or get_current_registry_path()
+    server_registry = get_registry(registry_path)
     if name in server_registry:
-        return
+        return get_proxy(name)
 
     # attributes the object must not posses
-    service = _create_srpo_service(obj, proxy_registry=proxy_registry)
+    service = _create_srpo_service(obj, name, registry_path=registry_path)
 
     def _remote():
         """ Code to execute on forked process. """
 
         kwargs = dict(
-            hostname='localhost',
+            hostname="localhost",
             nbThreads=server_threads,
             protocol_config=dict(allow_public_attrs=True),
             port=port,
         )
 
         server = ThreadPoolServer(service, **kwargs)
-
-        sql_kwargs = dict(filename=server_registry.filename,
-                          tablename=server_registry.tablename,
-                          flag='c')
+        sql_kwargs = dict(
+            filename=server_registry.filename,
+            tablename=server_registry.tablename,
+            flag="c",
+        )
         registery = SqliteDict(**sql_kwargs)
         registery[name] = (server.host, server.port, os.getpid())
         registery.commit()
+        service._server = server
         server.start()
 
     if remote:
@@ -65,21 +80,22 @@ def transcend(obj: Any, name: str, server_threads=1, port=0, remote=True) -> Non
         _remote()
 
     # give the server a bit of time to start before releasing control
-    time.sleep(0.2)
+    time.sleep(0.1)
     # the name should be in the remote server now
     assert name in server_registry
+    return get_proxy(name)
 
 
 def terminate(name: str) -> None:
     """
-    Terminate a processes  containing a transcended object.
+    Terminate a processes containing a transcended object.
 
     Parameters
     ----------
     name
         The name of the transcended object
     """
-    server_registry = get_registry('server')
+    server_registry = get_registry()
     if name not in server_registry:
         return
     # get process id and kill process
@@ -89,7 +105,16 @@ def terminate(name: str) -> None:
     server_registry.pop(name)
 
 
-def get_proxy(name: str):
+def terminate_all(registry_path: Optional[Path]):
+    """ Terminate all processes in a registry. """
+    registry = get_registry(registry_path)
+    for key in registry:
+        proxy = SrpoProxy(key)
+        proxy.shutdown()
+    Path(registry_path).unlink()
+
+
+def get_proxy(name: str) -> SrpoProxy:
     """
     Get a proxy for a transcendent object.
 
@@ -98,12 +123,17 @@ def get_proxy(name: str):
     name
         The name of the transcended object.
     """
-    server_registry = get_registry('server')
-    assert name in server_registry
+
+    server_registry = get_registry()
+    if name not in server_registry:
+        msg = f"could not find server associated with {name}"
+        raise ConnectionError(msg)
     host, port, _ = server_registry[name]
     # try to connect, register this end of proxy, return proxy
-    proxy = rpyc.connect(host, port).root
-    proxy_id = (id(proxy), psutil.Process().pid)
-    proxy.register_proxy(proxy_id)
-    breakpoint()
-    return proxy
+    try:
+        connection = rpyc.connect(host, port)
+    except Exception:
+        msg = f"could not connect to server associated with {name}"
+        raise ConnectionError(msg)
+
+    return SrpoProxy(name, connection)

@@ -12,7 +12,7 @@ class TestMultiprocessingSqlLite:
 
     @pytest.fixture
     def sqldict(self, tmp_path):
-        path = tmp_path / 'temp.sqlite'
+        path = tmp_path / "temp.sqlite"
         path.parent.mkdir(exist_ok=True, parents=True)
         yield SqliteDict(path)
         path.unlink()
@@ -24,7 +24,7 @@ class TestMultiprocessingSqlLite:
 
         def _func():
             with SqliteDict(path) as mydict:
-                mydict['bob'] = 2
+                mydict["bob"] = 2
                 mydict.commit()
 
         proc = multiprocessing.Process(target=_func)
@@ -37,4 +37,4 @@ class TestMultiprocessingSqlLite:
 
     def test_value_added(self, sqldict_added_value):
         """ ensure the value was added to the dict. """
-        assert 'bob' in sqldict_added_value
+        assert "bob" in sqldict_added_value

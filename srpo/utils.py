@@ -1,11 +1,12 @@
 """
 Utilities for srpo.
 """
-import sys
-from functools import wraps
+from contextlib import suppress
 from pathlib import Path
+from typing import Optional, Union
 
-from rpyc.core.service import ClassicService, Service
+import psutil
+from rpyc.core.service import Service
 from sqlitedict import SqliteDict
 
 STATE = dict(
@@ -14,20 +15,27 @@ STATE = dict(
 )
 
 
-def get_registry(registry_type="server"):
+def get_registry(registry_path: Optional[Union[str, Path]] = None) -> SqliteDict:
     """
-    Get
+    Get the sqlite backed registry (key value pair).
+
     Parameters
     ----------
-    registry_type
+    registry_path
         Either "server" or "proxy"
 
     Returns
     -------
 
     """
-    kwargs = dict(autocommit=True, tablename=registry_type)
-    return SqliteDict(STATE["current"], **kwargs)
+    path = registry_path or get_current_registry_path()
+    kwargs = dict(autocommit=True, tablename="server")
+    return SqliteDict(path, **kwargs)
+
+
+def get_current_registry_path():
+    """ Return the current registry path """
+    return STATE["current"]
 
 
 def set_registry_path(new_path):
@@ -55,80 +63,41 @@ def set_registry_path(new_path):
     return _RegistryManager()
 
 
-class PassThroughDescriptor:
-    """ A descriptor to simply pass through get, set, and del to an object. """
+class PassThrough:
+    """ Class to pass through simple python interactions to self._obj """
 
-    def __init__(self, attr, obj):
-        self._obj = obj
-        self._attr = attr
+    obj = None
 
-    def __get__(self, instance, owner):
-        return self._obj
+    # any attributes should be just passed to obj
+    def __getattr__(self, item):
+        return getattr(self.obj, item)
 
-    def __set__(self, instance, value):
-        setattr(self._obj, self._attr, value)
+    # set get attrs
+    def __getitem__(self, item):
+        return self.obj[item]
 
-    def __delattr__(self, item):
-        delattr(self._obj, self._attr)
+    def __setitem__(self, item, value):
+        self.obj[item] = value
 
+    def __iter__(self):
+        return iter(self.obj)
 
-def _wrap_entity(obj, name):
-    """ Wrap a callable or attribute. """
-    # first get the value of the name and decided what to do with it
-    value = getattr(obj, name)
+    def __len__(self):
+        return len(self.obj)
 
-    if callable(value):
-
-        @wraps(value)
-        def out(self, *args, **kwargs):
-            return value(*args, **kwargs)
-
-    else:
-        out = PassThroughDescriptor(obj, name)
-
-    return out
+    def __str__(self):
+        return str(self)
 
 
-def _create_srpo_service(obj, proxy_registry):
+def _create_srpo_service(object, server_name, registry_path=None):
     """ Create a rpyc service from object. """
 
-    #
-    # sacred_attrs = {"on_connect", "on_disconnect"}
-    # dir_set = set(dir(obj))
-    # assert (
-    #     not sacred_attrs & dir_set
-    # ), f"object must not have attributes named: {sacred_attrs}"
-    #
-    # # add connection and disconnection logic
-    # def on_connect(self, conn):
-    #     # register the proxy
-    #     import remote_pdb;
-    #     remote_pdb.set_trace('127.0.0.1', 8886)
-    #     pass
-    #
-    # def on_disconnect(self, conn):
-    #     # deregister the proxy
-    #     # shutdown the server if no proxies are using it
-    #     pass
-    #
-    # # wrap all attr/methods
-    # attr_dict = {i: _wrap_entity(obj, i) for i in dir_set if not i.startswith('_')}
-    # attr_dict["on_connect"] = on_connect
-    # attr_dict["on_disconnect"] = on_disconnect
-    #
-    # def bob():
-    #     print('bob')
-    #
-    # # create server, register service and start
-    #
-    # di = {'get': _wrap_entity(obj, 'get')}
-    # cls = type("MyService", (ClassicService,), di) #attr_dict)
-
-    # return cls
-
-    class ProxyService(Service):
+    class ProxyService(Service, PassThrough):
         _proxies = set()
-        _proxy_id = None
+        _server = None
+        obj = object
+        name = server_name
+        _registry_path = registry_path
 
         def on_connect(self, conn):
             # register the proxy
@@ -139,40 +108,58 @@ def _create_srpo_service(obj, proxy_registry):
             # shutdown the server if no proxies are using it
             pass
 
-        # any attributes should be just passed to obj
-        def __getattr__(self, item):
-            return getattr(obj, item)
-
-        # set get attrs
-        def __getitem__(self, item):
-            return obj[item]
-
-        def __setitem__(self, item, value):
-            obj[item] = value
-
-        def __iter__(self):
-            return iter(obj)
-
-        def __len__(self):
-            return len(obj)
-
-        def __str__(self):
-            return str(self)
-
         def register_proxy(self, proxy_id):
+            self.__dict__["_proxy_id"] = proxy_id
             self._proxies.add(proxy_id)
 
         def deregister_proxy(self, proxy_id):
-            try:
+            """ Remove a proxy from the registry. """
+            with suppress(TypeError, KeyError):
                 self._proxies.remove(proxy_id)
-            except TypeError:
-                pass
-            # if no registered proxies shutdown server
-            if not len(self._proxies):
-                sys.exit(0)
+            # if the registry is empty pop the name out of the registry
+            if not self._proxies:
+                get_registry(self._registry_path).pop(self.name, None)
 
-        def __del__(self):
-            if self._proxy_id:
-                self.deregister_proxy(self._proxy_id)
+        def close(self, proxy_id=None):
+            """ Close down the server if one is attached. """
+            if self._server:
+                with suppress(RuntimeError):
+                    self._server.close()
+                # Deregister proxy
+                self.deregister_proxy(proxy_id)
+                get_registry(self._registry_path).pop(self.name, None)
 
     return ProxyService
+
+
+class SrpoProxy(PassThrough):
+    def __init__(self, name, connection):
+        """
+        Get a proxy for a transcendent object.
+
+        Parameters
+        ----------
+        name
+            The name of the transcended object.
+        """
+        self._connection = connection
+        self.obj = self._connection.root
+        self._proxy_id = (id(self), psutil.Process().pid)
+        self.obj.register_proxy(self._proxy_id)
+
+    def __getattr__(self, item):
+        return getattr(self.obj, item)
+
+    def __del__(self):
+        with suppress(Exception):
+            self.obj.deregister_proxy(self._proxy_id)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def close(self):
+        with suppress(Exception):
+            self.obj.close(self._proxy_id)
