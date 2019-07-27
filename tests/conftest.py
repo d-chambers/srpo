@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from srpo.utils import set_registry_path
+from srpo.core import set_registry_path
 
 
 @pytest.fixture(autouse=True, scope="session")

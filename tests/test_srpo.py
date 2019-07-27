@@ -16,7 +16,7 @@ import pytest
 import psutil
 
 from srpo import get_proxy, transcend, terminate
-from srpo.utils import get_registry
+from srpo.core import get_registry
 
 
 @pytest.fixture(scope="class")
