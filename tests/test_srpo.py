@@ -78,7 +78,7 @@ class TestSetAttr:
 class TestOneProcessOneThread:
     """ Test that transcended objects run on one thread / process. """
 
-    worker_count = 3
+    worker_count = 8
 
     @pytest.fixture(scope="class")
     def thread_proc_counter(self, tmpdir_factory):
@@ -134,7 +134,6 @@ class TestOneProcessOneThread:
         """ Run on a pool. """
         out = []
         for num in range(self.worker_count):
-            time.sleep(0.1)
             out.append(pool.submit(thread_proc_counter.log))
         list(as_completed(out))
 
