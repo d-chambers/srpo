@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from srpo.core import set_registry_path
+from srpo.core import set_registry_path, terminate_all
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -19,6 +19,9 @@ def switch_resgistry_path():
     # set the registry and yield
     with set_registry_path(path):
         yield
+    # terminate all running servers
+    terminate_all(path)
     # remove any registry
     if path.exists():
         path.unlink()
+

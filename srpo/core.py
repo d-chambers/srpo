@@ -179,7 +179,7 @@ def transcend(
         _remote()
 
     # give the server a bit of time to start before releasing control
-    time.sleep(0.1)
+    time.sleep(0.2)  # TODO:
     # the name should be in the remote server now
     assert name in server_registry
     return get_proxy(name)
