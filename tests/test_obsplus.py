@@ -11,7 +11,6 @@ import obspy
 import obsplus
 import pandas as pd
 
-
 from srpo import transcend
 
 
@@ -45,3 +44,8 @@ class TestBankBasics:
         st = transcended_bank.get_waveforms()
         assert isinstance(st, obspy.Stream)
         assert len(st)
+
+    def test_str_rep(self, transcended_bank):
+        """ Ensure the transcended bank works. """
+        out = str(transcended_bank)
+        assert isinstance(out, str)

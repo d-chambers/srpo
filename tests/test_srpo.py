@@ -96,7 +96,7 @@ class TestOneProcessOneThread:
                 return self.path / f"{proc}_{thread}.txt"
 
             def log(self):
-                """ write an empty file with the process id and trhead id. """
+                """ write an empty file with the process id and thread id. """
                 path = self.get_log_name()
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("w") as fi:
@@ -132,9 +132,10 @@ class TestOneProcessOneThread:
 
     def run_on_pool(self, pool, thread_proc_counter):
         """ Run on a pool. """
+        proxy = get_proxy(thread_proc_counter)
         out = []
         for num in range(self.worker_count):
-            out.append(pool.submit(thread_proc_counter.log))
+            out.append(pool.submit(proxy.log))
         list(as_completed(out))
 
     def test_file_created(self, thread_proc_counter):
