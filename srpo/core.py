@@ -4,7 +4,6 @@ Core module of srpo.
 import multiprocessing
 import os
 import pickle
-import time
 from contextlib import suppress
 from functools import wraps
 from pathlib import Path
@@ -28,7 +27,6 @@ _REGISTRY_STATE = dict(
 
 
 # --- Service and proxy wrapper
-
 
 class PassThrough:
     """ Class to pass through simple python interactions to self._obj """
@@ -139,12 +137,12 @@ def _create_srpo_service(object, server_name, registry_path=None):
 
 
 def transcend(
-    obj: Any,
-    name: str,
-    server_threads=1,
-    port=0,
-    remote=True,
-    registry_path: Optional[str] = None,
+        obj: Any,
+        name: str,
+        server_threads=1,
+        port=0,
+        remote: bool = True,
+        registry_path: Optional[str] = None,
 ) -> SrpoProxy:
     """
     Transcend an object to its own process.
@@ -157,6 +155,16 @@ def transcend(
         Any python object.
     name
         A string identifier so other processes can find the object.
+    server_threads
+        The number of threads to allow for the server pool. If one is used
+        everything is executed synchronously.
+    port
+        The port to bind to.
+    remote
+        If True run the server on a remote process. Typically only set to
+        False for debugging.
+    registry_path
+        The path to the simple sqlitedict used to register IPs and ports.
     """
     # name is already in use; just bail out and return proxy to it
     registry_path = registry_path or get_current_registry_path()
@@ -164,12 +172,11 @@ def transcend(
     if name in server_registry:
         return get_proxy(name)
 
-    # attributes the object must not posses
-
     def _remote():
         """ Code to execute on forked process. """
 
         service = _create_srpo_service(obj, name, registry_path=registry_path)
+        # set new process group
 
         kwargs = dict(
             hostname="localhost",
@@ -193,14 +200,16 @@ def transcend(
         server.start()
 
     if remote:
-        multiprocessing.Process(target=_remote).start()
+        proc = multiprocessing.Process(target=_remote, daemon=True)
+        proc.start()
+        # give the server a bit of time to start before releasing control
+        proc.join(.2)
+
     else:
         # if True:
         # breakpoint()
         _remote()
 
-    # give the server a bit of time to start before releasing control
-    time.sleep(0.2)  # TODO:
     # the name should be in the remote server now
     assert name in server_registry
     return get_proxy(name)
