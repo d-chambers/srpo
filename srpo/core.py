@@ -208,7 +208,7 @@ def terminate_all(registry_path: Optional[Path]):
     """ Terminate all processes in a registry. """
     registry = get_registry(registry_path)
     for key in registry:
-        proxy = SrpoProxy(key)
+        proxy = get_proxy(key)
         proxy.shutdown()
     Path(registry_path).unlink()
 
