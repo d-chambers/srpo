@@ -55,6 +55,9 @@ class PassThrough:
 
 
 class SrpoProxy(PassThrough):
+    """
+    A poxy object for accessing rpyc service.
+    """
     def __init__(self, connection, name):
         """
         Get a proxy for a transcendent object.
@@ -72,10 +75,13 @@ class SrpoProxy(PassThrough):
 
     def __getattr__(self, item):
         value = getattr(self.obj, item)
-        # try to pickle and de-pickle return object to get rid of netrefs.
+        # if the thing returned is of the same type keep the netref.
+        if isinstance(value, type(self.obj)):
+            return value
+        # else try to pickle and de-pickle return object to get rid of netref.
         try:
             return obtain(value)
-        except Exception:  # cant pickle this whatever it is
+        except Exception:  # cant pickle this whatever it is, just return
             return value
 
     def __del__(self):
@@ -132,6 +138,11 @@ def _create_srpo_service(object, server_name, registry_path=None):
                 # Deregister proxy
                 self.deregister_proxy(proxy_id)
                 get_registry(self._registry_path).pop(self.name, None)
+
+        @property
+        def obj_attrs(self):
+            """ Return a tuple of object attributes. """
+            return tuple(x for x in dir(self.obj) if not x.startswith('_'))
 
     return ProxyService
 
