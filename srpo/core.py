@@ -3,9 +3,7 @@ Core module of srpo.
 """
 import multiprocessing
 import os
-import pickle
 from contextlib import suppress
-from functools import wraps
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -27,6 +25,7 @@ _REGISTRY_STATE = dict(
 
 
 # --- Service and proxy wrapper
+
 
 class PassThrough:
     """ Class to pass through simple python interactions to self._obj """
@@ -58,6 +57,7 @@ class SrpoProxy(PassThrough):
     """
     A poxy object for accessing rpyc service.
     """
+
     def __init__(self, connection, name):
         """
         Get a proxy for a transcendent object.
@@ -72,10 +72,24 @@ class SrpoProxy(PassThrough):
         self.obj = self._connection.root
         self._proxy_id = (id(self), psutil.Process().pid)
         self.obj.register_proxy(self._proxy_id)
+        # give instances all methods of object
+        for name, doc in self.obj.methods.items():
+            setattr(self, name, self._generate_wrap_method(name, doc))
 
-    def __getattr__(self, item):
-        value = getattr(self.obj, item)
-        # if the thing returned is of the same type keep the netref.
+    def _generate_wrap_method(self, name, doc):
+        """ method to generate methods which simply pass arguments to proxy obj """
+
+        def _func(*args, **kwargs):
+            value = getattr(self.obj, name)(*args, **kwargs)
+            return self._maybe_unwrap_value(value)
+
+        setattr(_func, "__doc__", doc)
+        return _func
+
+    def _maybe_unwrap_value(self, value):
+        """ If the object is the same type as self, return it, else try to
+        to unwrap it. """
+
         if isinstance(value, type(self.obj)):
             return value
         # else try to pickle and de-pickle return object to get rid of netref.
@@ -83,6 +97,9 @@ class SrpoProxy(PassThrough):
             return obtain(value)
         except Exception:  # cant pickle this whatever it is, just return
             return value
+
+    def __getattr__(self, item):
+        return self._maybe_unwrap_value(getattr(self.obj, item))
 
     def __del__(self):
         with suppress(Exception):
@@ -101,6 +118,7 @@ class SrpoProxy(PassThrough):
 
 def _create_srpo_service(object, server_name, registry_path=None):
     """ Create a rpyc service from object. """
+    obj_dir = {x: getattr(object, x) for x in dir(object) if not x.startswith("_")}
 
     class ProxyService(Service, PassThrough):
         _proxies = set()
@@ -108,6 +126,13 @@ def _create_srpo_service(object, server_name, registry_path=None):
         obj = object
         name = server_name
         _registry_path = registry_path
+        # get a dict of method name / docstring
+        methods = {
+            x: i.__doc__
+            for x, i in obj_dir.items()
+            if hasattr(i, "__doc__") and callable(i)
+        }
+        attrs = set(obj_dir) - set(methods)
 
         def on_connect(self, conn):
             # register the proxy
@@ -140,20 +165,20 @@ def _create_srpo_service(object, server_name, registry_path=None):
                 get_registry(self._registry_path).pop(self.name, None)
 
         @property
-        def obj_attrs(self):
+        def public_methods(self):
             """ Return a tuple of object attributes. """
-            return tuple(x for x in dir(self.obj) if not x.startswith('_'))
+            return tuple(x for x in dir(self.obj) if not x.startswith("_"))
 
     return ProxyService
 
 
 def transcend(
-        obj: Any,
-        name: str,
-        server_threads=1,
-        port=0,
-        remote: bool = True,
-        registry_path: Optional[str] = None,
+    obj: Any,
+    name: str,
+    server_threads=1,
+    port=0,
+    remote: bool = True,
+    registry_path: Optional[str] = None,
 ) -> SrpoProxy:
     """
     Transcend an object to its own process.
@@ -214,7 +239,7 @@ def transcend(
         proc = multiprocessing.Process(target=_remote, daemon=True)
         proc.start()
         # give the server a bit of time to start before releasing control
-        proc.join(.2)
+        proc.join(0.2)
 
     else:
         # if True:
@@ -255,24 +280,6 @@ def terminate_all(registry_path: Optional[Path]):
             continue
         proxy.shutdown()
     Path(registry_path).unlink()
-
-
-def _wrap_methods_with_obtain(old_func):
-    """ """
-
-    @wraps(old_func)
-    def _wrap(*args, **kwargs):
-        return obtain(old_func(*args, **kwargs))
-
-    return _wrap
-
-
-def _pickle_results(func):
-    @wraps(func)
-    def _wrap(*args, **kwargs):
-        return pickle.dumps(func(*args, **kwargs))
-
-    return _wrap
 
 
 def get_proxy(name: str) -> SrpoProxy:

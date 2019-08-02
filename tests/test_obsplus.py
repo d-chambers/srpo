@@ -53,6 +53,4 @@ class TestBankBasics:
 
     def test_isinstance_waveform_client(self, transcended_bank):
         """ The duck typing should still work. """
-        breakpoint()
         assert isinstance(transcended_bank, WaveformClient)
-
