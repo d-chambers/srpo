@@ -22,8 +22,8 @@ rpyc.core.protocol.DEFAULT_CONFIG["allow_pickle"] = True
 
 # State for where the simple registry is found
 _REGISTRY_STATE = dict(
-    default=Path().home() / ".spro_registry.sqlite",
-    current=Path().home() / ".spro_registry.sqlite",
+    default=Path().home() / ".srpo_registry.sqlite",
+    current=Path().home() / ".srpo_registry.sqlite",
 )
 
 
