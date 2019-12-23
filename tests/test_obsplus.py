@@ -12,6 +12,7 @@ import obsplus
 import pandas as pd
 
 from srpo import transcend
+from obsplus.interfaces import WaveformClient
 
 
 @pytest.fixture(scope="class")
@@ -49,3 +50,7 @@ class TestBankBasics:
         """ Ensure the transcended bank works. """
         out = str(transcended_bank)
         assert isinstance(out, str)
+
+    def test_isinstance_waveform_client(self, transcended_bank):
+        """ The duck typing should still work. """
+        assert isinstance(transcended_bank, WaveformClient)

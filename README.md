@@ -24,3 +24,7 @@ assert proxy1['shared'] == proxy2['shared'] == 2
 proxy2['another_attr'] = 3
 assert proxy1['another_attr'] == 3
 ```
+
+## Note
+When the main process exists the process in which the transcended object lives
+will be terminated.  
