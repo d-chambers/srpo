@@ -220,7 +220,6 @@ def transcend(
 
     def _remote():
         """ Code to execute on forked process. """
-        print(registry_path)
         service = _create_srpo_service(obj, name, registry_path=registry_path)
         # set new process group
 
