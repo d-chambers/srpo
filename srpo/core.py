@@ -3,6 +3,7 @@ Core module of srpo.
 """
 import multiprocessing
 import os
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -13,6 +14,8 @@ from rpyc import Service
 from rpyc.utils.classic import obtain
 from rpyc.utils.server import ThreadPoolServer
 from sqlitedict import SqliteDict
+
+from srpo.exceptions import SrpoConnectionError
 
 # enable pickling in rpyc, 'cause living on the edge is the only way to live
 rpyc.core.protocol.DEFAULT_CONFIG["allow_pickle"] = True
@@ -202,15 +205,22 @@ def transcend(
     registry_path
         The path to the simple sqlitedict used to register IPs and ports.
     """
-    # name is already in use; just bail out and return proxy to it
+    # Get the registry path. This does need to be here to preserve any changes
+    # in path for when a new process starts.
     registry_path = registry_path or get_current_registry_path()
     server_registry = get_registry(registry_path)
+    # If the object has already been transcended just return it
     if name in server_registry:
-        return get_proxy(name)
+        try:
+            return get_proxy(name)
+        # If it fails remove it and start over
+        except SrpoConnectionError:
+            terminate(name)
+            time.sleep(0.2)
 
     def _remote():
         """ Code to execute on forked process. """
-
+        print(registry_path)
         service = _create_srpo_service(obj, name, registry_path=registry_path)
         # set new process group
 
@@ -242,8 +252,6 @@ def transcend(
         proc.join(0.2)
 
     else:
-        # if True:
-        # breakpoint()
         _remote()
 
     # the name should be in the remote server now
@@ -251,23 +259,26 @@ def transcend(
     return get_proxy(name)
 
 
-def terminate(name: str) -> None:
+def terminate(name: str, registry_path: Optional[Path] = None) -> None:
     """
     Terminate a processes containing a transcended object.
 
     Parameters
     ----------
     name
-        The name of the transcended object
+        The name of the transcended object.
+    registry_path
+        The path to the simple sqlitedict used to register IPs and ports.
     """
-    server_registry = get_registry()
+    server_registry = get_registry(registry_path)
     if name not in server_registry:
         return
     # get process id and kill process
     pid = server_registry[name][-1]
-    psutil.Process(pid).terminate()
+    with suppress(psutil.NoSuchProcess):
+        psutil.Process(pid).terminate()
     # remove name from registry
-    server_registry.pop(name)
+    server_registry.pop(name, None)
 
 
 def terminate_all(registry_path: Optional[Path]):
@@ -282,7 +293,7 @@ def terminate_all(registry_path: Optional[Path]):
     Path(registry_path).unlink()
 
 
-def get_proxy(name: str) -> SrpoProxy:
+def get_proxy(name: str, registry_path: Optional[str] = None) -> SrpoProxy:
     """
     Get a proxy for a transcendent object.
 
@@ -290,22 +301,24 @@ def get_proxy(name: str) -> SrpoProxy:
     ----------
     name
         The name of the transcended object.
+    registry_path
+        The path to the simple sqlitedict used to register IPs and ports.
     """
     # if another proxy was passed we just need to peel the name off this one.
     if isinstance(name, SrpoProxy):
         name = name._name
 
-    server_registry = get_registry()
+    server_registry = get_registry(registry_path)
     if name not in server_registry:
         msg = f"could not find server associated with {name}"
-        raise ConnectionError(msg)
+        raise SrpoConnectionError(msg)
     host, port, _ = server_registry[name]
     # try to connect, register this end of proxy, return proxy
     try:
         connection = rpyc.connect(host, port)
     except Exception:
         msg = f"could not connect to server associated with {name}"
-        raise ConnectionError(msg)
+        raise SrpoConnectionError(msg)
 
     return SrpoProxy(connection, name=name)
 

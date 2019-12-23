@@ -16,7 +16,8 @@ import pytest
 import psutil
 
 from srpo import get_proxy, transcend, terminate
-from srpo.core import get_registry
+from srpo.exceptions import SrpoConnectionError
+from srpo.core import get_registry, terminate
 
 
 @pytest.fixture(scope="class")
@@ -192,3 +193,35 @@ class TestSTDout:
         stdouting.print(some_str)
         captured = capsys.readouterr()
         assert some_str in str(captured)
+
+
+class TestTranscendWithBadEntryInRegistry:
+    """
+    If a tag is not removed from the registry but the server is shutdown
+    this results in an error state. When calling transcend the registry
+    should simply be corrected.
+    """
+
+    name = "_bad_entry"
+
+    @pytest.fixture(scope="class")
+    def corrupted_registry(self):
+        """
+        Add a bogus entry to the registry to simulate a server shutting
+        down without cleaning up registry.
+        """
+        registry = get_registry()
+        registry[self.name] = ("localhost", 9245, 2114)
+        registry.commit()
+        yield
+        terminate(self.name)
+
+    def test_get_proxy_errors(self, corrupted_registry):
+        """ Get proxy should raise an error. """
+        with pytest.raises(SrpoConnectionError):
+            get_proxy(self.name)
+
+    def test_transcend(self, corrupted_registry):
+        """ However, a transcended """
+        out = transcend({1: 2, 3: 4}, self.name)
+        assert out[1] == 2 and out[3] == 4
