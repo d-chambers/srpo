@@ -260,9 +260,6 @@ def transcend(
         _remote()
 
     # the name should be in the remote server now
-    if name not in server_registry:
-        breakpoint()
-
     assert name in server_registry
     return get_proxy(name)
 
@@ -289,7 +286,7 @@ def terminate(name: str, registry_path: Optional[Path] = None) -> None:
     server_registry.pop(name, None)
 
 
-def terminate_all(registry_path: Optional[Path]=None):
+def terminate_all(registry_path: Optional[Path] = None):
     """ Terminate all processes in a registry. """
     registry = get_registry(registry_path)
     for key in registry:
