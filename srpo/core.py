@@ -244,16 +244,21 @@ def transcend(
         service._server = server
         server.start()
 
-    if remote:
+    if remote:  # launch other process to run server
         proc = multiprocessing.Process(target=_remote, daemon=True)
         proc.start()
         # give the server a bit of time to start before releasing control
-        proc.join(0.2)
-
+        for _ in range(20):
+            if name in server_registry:
+                return get_proxy(name)
+            time.sleep(0.1)
     else:
         _remote()
 
     # the name should be in the remote server now
+    if name not in server_registry:
+        breakpoint()
+
     assert name in server_registry
     return get_proxy(name)
 
@@ -280,7 +285,7 @@ def terminate(name: str, registry_path: Optional[Path] = None) -> None:
     server_registry.pop(name, None)
 
 
-def terminate_all(registry_path: Optional[Path]):
+def terminate_all(registry_path: Optional[Path]=None):
     """ Terminate all processes in a registry. """
     registry = get_registry(registry_path)
     for key in registry:
