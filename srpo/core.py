@@ -182,6 +182,7 @@ def transcend(
     port=0,
     remote: bool = True,
     registry_path: Optional[str] = None,
+    daemon=True,
 ) -> SrpoProxy:
     """
     Transcend an object to its own process.
@@ -204,6 +205,9 @@ def transcend(
         False for debugging.
     registry_path
         The path to the simple sqlitedict used to register IPs and ports.
+    daemon
+        If True start the transcended server in a daemon process. Only has an
+        effect when remote == True.
     """
     # Get the registry path. This does need to be here to preserve any changes
     # in path for when a new process starts.
@@ -245,7 +249,7 @@ def transcend(
         server.start()
 
     if remote:  # launch other process to run server
-        proc = multiprocessing.Process(target=_remote, daemon=True)
+        proc = multiprocessing.Process(target=_remote, daemon=daemon)
         proc.start()
         # give the server a bit of time to start before releasing control
         for _ in range(20):
@@ -294,7 +298,8 @@ def terminate_all(registry_path: Optional[Path]=None):
         except Exception:
             continue
         proxy.shutdown()
-    Path(registry_path).unlink()
+    if registry_path:
+        Path(registry_path).unlink()
 
 
 def get_proxy(name: str, registry_path: Optional[str] = None) -> SrpoProxy:
