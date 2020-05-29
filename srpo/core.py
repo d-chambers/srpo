@@ -280,7 +280,7 @@ def terminate(name: str, registry_path: Optional[Path] = None) -> None:
         return
     # get process id and kill process
     pid = server_registry[name][-1]
-    with suppress(psutil.NoSuchProcess):
+    with suppress((psutil.NoSuchProcess, psutil.AccessDenied)):
         psutil.Process(pid).terminate()
     # remove name from registry
     server_registry.pop(name, None)

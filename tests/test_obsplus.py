@@ -19,7 +19,7 @@ from obsplus.interfaces import WaveformClient
 def transcended_bank(tmpdir_factory):
     """ Transcend a bank server. """
     tmpdir = Path(tmpdir_factory.mktemp("bob"))
-    ds = obsplus.load_dataset("bingham").copy_to(tmpdir)
+    ds = obsplus.load_dataset("bingham_test").copy_to(tmpdir)
     bank = obsplus.WaveBank(ds.waveform_path)
     proxy = transcend(bank, "wavebank")
     yield proxy
