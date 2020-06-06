@@ -19,6 +19,9 @@ from srpo.exceptions import SrpoConnectionError
 
 # enable pickling in rpyc, 'cause living on the edge is the only way to live
 rpyc.core.protocol.DEFAULT_CONFIG["allow_pickle"] = True
+rpyc.core.protocol.DEFAULT_CONFIG["allow_all_attrs"] = True
+rpyc.core.protocol.DEFAULT_CONFIG["allow_public_attrs"] = True
+
 
 # State for where the simple registry is found
 _REGISTRY_STATE = dict(
@@ -227,10 +230,12 @@ def transcend(
         service = _create_srpo_service(obj, name, registry_path=registry_path)
         # set new process group
 
+        protocol = dict(allow_all_attrs=True)
+
         kwargs = dict(
             hostname="localhost",
             nbThreads=server_threads,
-            protocol_config=dict(allow_public_attrs=True),
+            protocol_config=protocol,
             port=port,
         )
 
