@@ -257,7 +257,7 @@ def transcend(
         proc = multiprocessing.Process(target=_remote, daemon=daemon)
         proc.start()
         # give the server a bit of time to start before releasing control
-        for _ in range(20):
+        for _ in range(100):
             if name in server_registry:
                 return get_proxy(name)
             time.sleep(0.1)
