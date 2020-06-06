@@ -11,14 +11,27 @@ from typing import Any, Optional, Union
 import psutil
 import rpyc
 from rpyc import Service
+from rpyc.utils.classic import obtain
 from rpyc.utils.server import ThreadPoolServer
 from sqlitedict import SqliteDict
 
+from srpo.exceptions import SrpoConnectionError
+
 # enable pickling in rpyc, 'cause living on the edge is the only way to live
 rpyc.core.protocol.DEFAULT_CONFIG["allow_pickle"] = True
+rpyc.core.protocol.DEFAULT_CONFIG["allow_all_attrs"] = True
+rpyc.core.protocol.DEFAULT_CONFIG["allow_public_attrs"] = True
+
+
+# State for where the simple registry is found
+_REGISTRY_STATE = dict(
+    default=Path().home() / ".srpo_registry.sqlite",
+    current=Path().home() / ".srpo_registry.sqlite",
+)
 
 
 # --- Service and proxy wrapper
+
 
 class PassThrough:
     """ Class to pass through simple python interactions to self._obj """
@@ -43,26 +56,56 @@ class PassThrough:
         return len(self.obj)
 
     def __str__(self):
-        return str(self)
+        return str(self.obj)
 
 
 class SrpoProxy(PassThrough):
-    def __init__(self, name, connection):
+    """
+    A poxy object for accessing rpyc service.
+    """
+
+    def __init__(self, connection, name):
         """
         Get a proxy for a transcendent object.
 
         Parameters
         ----------
-        name
-            The name of the transcended object.
+        connection
+            The rpyc connection object to the service.
         """
         self._connection = connection
+        self._name = name
         self.obj = self._connection.root
         self._proxy_id = (id(self), psutil.Process().pid)
         self.obj.register_proxy(self._proxy_id)
+        # give instances all methods of object
+        for name, doc in self.obj.methods.items():
+            setattr(self, name, self._generate_wrap_method(name, doc))
+
+    def _generate_wrap_method(self, name, doc):
+        """ method to generate methods which simply pass arguments to proxy obj """
+
+        def _func(*args, **kwargs):
+            value = getattr(self.obj, name)(*args, **kwargs)
+            return self._maybe_unwrap_value(value)
+
+        setattr(_func, "__doc__", doc)
+        return _func
+
+    def _maybe_unwrap_value(self, value):
+        """ If the object is the same type as self, return it, else try to
+        to unwrap it. """
+
+        if isinstance(value, type(self.obj)):
+            return value
+        # else try to pickle and de-pickle return object to get rid of netref.
+        try:
+            return obtain(value)
+        except Exception:  # cant pickle this whatever it is, just return
+            return value
 
     def __getattr__(self, item):
-        return getattr(self.obj, item)
+        return self._maybe_unwrap_value(getattr(self.obj, item))
 
     def __del__(self):
         with suppress(Exception):
@@ -81,6 +124,7 @@ class SrpoProxy(PassThrough):
 
 def _create_srpo_service(object, server_name, registry_path=None):
     """ Create a rpyc service from object. """
+    obj_dir = {x: getattr(object, x) for x in dir(object) if not x.startswith("_")}
 
     class ProxyService(Service, PassThrough):
         _proxies = set()
@@ -88,6 +132,13 @@ def _create_srpo_service(object, server_name, registry_path=None):
         obj = object
         name = server_name
         _registry_path = registry_path
+        # get a dict of method name / docstring
+        methods = {
+            x: i.__doc__
+            for x, i in obj_dir.items()
+            if hasattr(i, "__doc__") and callable(i)
+        }
+        attrs = set(obj_dir) - set(methods)
 
         def on_connect(self, conn):
             # register the proxy
@@ -119,16 +170,22 @@ def _create_srpo_service(object, server_name, registry_path=None):
                 self.deregister_proxy(proxy_id)
                 get_registry(self._registry_path).pop(self.name, None)
 
+        @property
+        def public_methods(self):
+            """ Return a tuple of object attributes. """
+            return tuple(x for x in dir(self.obj) if not x.startswith("_"))
+
     return ProxyService
 
 
 def transcend(
-        obj: Any,
-        name: str,
-        server_threads=1,
-        port=0,
-        remote=True,
-        registry_path: Optional[str] = None,
+    obj: Any,
+    name: str,
+    server_threads=1,
+    port=0,
+    remote: bool = True,
+    registry_path: Optional[str] = None,
+    daemon=True,
 ) -> SrpoProxy:
     """
     Transcend an object to its own process.
@@ -141,79 +198,113 @@ def transcend(
         Any python object.
     name
         A string identifier so other processes can find the object.
+    server_threads
+        The number of threads to allow for the server pool. If one is used
+        everything is executed synchronously.
+    port
+        The port to bind to.
+    remote
+        If True run the server on a remote process. Typically only set to
+        False for debugging.
+    registry_path
+        The path to the simple sqlitedict used to register IPs and ports.
+    daemon
+        If True start the transcended server in a daemon process. Only has an
+        effect when remote == True.
     """
-    # name is already in use; just bail out and return proxy to it
+    # Get the registry path. This does need to be here to preserve any changes
+    # in path for when a new process starts.
     registry_path = registry_path or get_current_registry_path()
     server_registry = get_registry(registry_path)
+    # If the object has already been transcended just return it
     if name in server_registry:
-        return get_proxy(name)
-
-    # attributes the object must not posses
-    service = _create_srpo_service(obj, name, registry_path=registry_path)
+        try:
+            return get_proxy(name)
+        # If it fails remove it and start over
+        except SrpoConnectionError:
+            terminate(name)
+            time.sleep(0.2)
 
     def _remote():
         """ Code to execute on forked process. """
+        service = _create_srpo_service(obj, name, registry_path=registry_path)
+        # set new process group
+
+        protocol = dict(allow_all_attrs=True)
 
         kwargs = dict(
             hostname="localhost",
             nbThreads=server_threads,
-            protocol_config=dict(allow_public_attrs=True),
+            protocol_config=protocol,
             port=port,
         )
 
-        server = ThreadPoolServer(service, **kwargs)
+        server = ThreadPoolServer(service(), **kwargs)
         sql_kwargs = dict(
             filename=server_registry.filename,
             tablename=server_registry.tablename,
             flag="c",
         )
+        # register new server
         registery = SqliteDict(**sql_kwargs)
         registery[name] = (server.host, server.port, os.getpid())
         registery.commit()
+        #
         service._server = server
         server.start()
 
-    if remote:
-        multiprocessing.Process(target=_remote).start()
+    if remote:  # launch other process to run server
+        proc = multiprocessing.Process(target=_remote, daemon=daemon)
+        proc.start()
+        # give the server a bit of time to start before releasing control
+        for _ in range(100):
+            if name in server_registry:
+                return get_proxy(name)
+            time.sleep(0.1)
     else:
         _remote()
 
-    # give the server a bit of time to start before releasing control
-    time.sleep(0.2)  # TODO:
     # the name should be in the remote server now
     assert name in server_registry
     return get_proxy(name)
 
 
-def terminate(name: str) -> None:
+def terminate(name: str, registry_path: Optional[Path] = None) -> None:
     """
     Terminate a processes containing a transcended object.
 
     Parameters
     ----------
     name
-        The name of the transcended object
+        The name of the transcended object.
+    registry_path
+        The path to the simple sqlitedict used to register IPs and ports.
     """
-    server_registry = get_registry()
+    server_registry = get_registry(registry_path)
     if name not in server_registry:
         return
     # get process id and kill process
     pid = server_registry[name][-1]
-    psutil.Process(pid).terminate()
+    with suppress((psutil.NoSuchProcess, psutil.AccessDenied)):
+        psutil.Process(pid).terminate()
     # remove name from registry
-    server_registry.pop(name)
+    server_registry.pop(name, None)
 
 
-def terminate_all(registry_path: Optional[Path]):
+def terminate_all(registry_path: Optional[Path] = None):
     """ Terminate all processes in a registry. """
     registry = get_registry(registry_path)
     for key in registry:
-        proxy = SrpoProxy(key)
+        try:
+            proxy = get_proxy(key)
+        except Exception:
+            continue
         proxy.shutdown()
-    Path(registry_path).unlink()
+    if registry_path:
+        Path(registry_path).unlink()
 
 
-def get_proxy(name: str) -> SrpoProxy:
+def get_proxy(name: str, registry_path: Optional[str] = None) -> SrpoProxy:
     """
     Get a proxy for a transcendent object.
 
@@ -221,27 +312,26 @@ def get_proxy(name: str) -> SrpoProxy:
     ----------
     name
         The name of the transcended object.
+    registry_path
+        The path to the simple sqlitedict used to register IPs and ports.
     """
+    # if another proxy was passed we just need to peel the name off this one.
+    if isinstance(name, SrpoProxy):
+        name = name._name
 
-    server_registry = get_registry()
+    server_registry = get_registry(registry_path)
     if name not in server_registry:
         msg = f"could not find server associated with {name}"
-        raise ConnectionError(msg)
+        raise SrpoConnectionError(msg)
     host, port, _ = server_registry[name]
     # try to connect, register this end of proxy, return proxy
     try:
         connection = rpyc.connect(host, port)
     except Exception:
         msg = f"could not connect to server associated with {name}"
-        raise ConnectionError(msg)
+        raise SrpoConnectionError(msg)
 
-    return SrpoProxy(name, connection)
-
-
-STATE = dict(
-    default=Path().home() / ".spro_registry.sqlite",
-    current=Path().home() / ".spro_registry.sqlite",
-)
+    return SrpoProxy(connection, name=name)
 
 
 def get_registry(registry_path: Optional[Union[str, Path]] = None) -> SqliteDict:
@@ -264,7 +354,7 @@ def get_registry(registry_path: Optional[Union[str, Path]] = None) -> SqliteDict
 
 def get_current_registry_path():
     """ Return the current registry path """
-    return STATE["current"]
+    return _REGISTRY_STATE["current"]
 
 
 def set_registry_path(new_path):
@@ -281,12 +371,12 @@ def set_registry_path(new_path):
 
     class _RegistryManager:
         def __init__(self):
-            STATE["current"] = new_path
+            _REGISTRY_STATE["current"] = new_path
 
         def __enter__(self):
             pass
 
         def __exit__(self, exc_type, exc_val, exc_tb):
-            STATE["current"] = STATE["default"]
+            _REGISTRY_STATE["current"] = _REGISTRY_STATE["default"]
 
     return _RegistryManager()

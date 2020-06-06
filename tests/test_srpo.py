@@ -16,7 +16,8 @@ import pytest
 import psutil
 
 from srpo import get_proxy, transcend, terminate
-from srpo.core import get_registry
+from srpo.exceptions import SrpoConnectionError
+from srpo.core import get_registry, terminate
 
 
 @pytest.fixture(scope="class")
@@ -96,7 +97,7 @@ class TestOneProcessOneThread:
                 return self.path / f"{proc}_{thread}.txt"
 
             def log(self):
-                """ write an empty file with the process id and trhead id. """
+                """ write an empty file with the process id and thread id. """
                 path = self.get_log_name()
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("w") as fi:
@@ -132,9 +133,10 @@ class TestOneProcessOneThread:
 
     def run_on_pool(self, pool, thread_proc_counter):
         """ Run on a pool. """
+        proxy = get_proxy(thread_proc_counter)
         out = []
         for num in range(self.worker_count):
-            out.append(pool.submit(thread_proc_counter.log))
+            out.append(pool.submit(proxy.log))
         list(as_completed(out))
 
     def test_file_created(self, thread_proc_counter):
@@ -191,3 +193,35 @@ class TestSTDout:
         stdouting.print(some_str)
         captured = capsys.readouterr()
         assert some_str in str(captured)
+
+
+class TestTranscendWithBadEntryInRegistry:
+    """
+    If a tag is not removed from the registry but the server is shutdown
+    this results in an error state. When calling transcend the registry
+    should simply be corrected.
+    """
+
+    name = "_bad_entry"
+
+    @pytest.fixture(scope="class")
+    def corrupted_registry(self):
+        """
+        Add a bogus entry to the registry to simulate a server shutting
+        down without cleaning up registry.
+        """
+        registry = get_registry()
+        registry[self.name] = ("localhost", 9245, 2114)
+        registry.commit()
+        yield
+        terminate(self.name)
+
+    def test_get_proxy_errors(self, corrupted_registry):
+        """ Get proxy should raise an error. """
+        with pytest.raises(SrpoConnectionError):
+            get_proxy(self.name)
+
+    def test_transcend(self, corrupted_registry):
+        """ However, a transcended """
+        out = transcend({1: 2, 3: 4}, self.name)
+        assert out[1] == 2 and out[3] == 4
