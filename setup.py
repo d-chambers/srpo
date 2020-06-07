@@ -9,7 +9,6 @@ import sys
 from os.path import join, exists, isdir
 from pathlib import Path
 
-
 from setuptools import setup
 
 PACKAGE_NAME = "srpo"
@@ -72,7 +71,6 @@ if doc_req:
 else:
     extra_req_dict = None
 
-
 setup(
     name=PACKAGE_NAME,
     version=__version__,
@@ -100,4 +98,5 @@ setup(
     tests_require=read_requirements(test_req_path),
     extras_require=extra_req_dict,
     python_requires=">=%s" % python_version_str,
+    entry_points={"console_scripts": ["srpo = srpo.cli:app"]},
 )
