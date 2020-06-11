@@ -40,11 +40,28 @@ class TestBankBasics:
         assert isinstance(df, pd.DataFrame)
         assert not df.empty
 
-    def test_get_waveforms(self, transcended_bank):
+    def test_get_waveforms_empty(self, transcended_bank):
         """ Ensure waveforms are returned. """
         st = transcended_bank.get_waveforms()
         assert isinstance(st, obspy.Stream)
         assert len(st)
+
+    def test_get_waveforms_with_kwargs(self, transcended_bank):
+        """Ensure values can be passed to the functions."""
+        t1 = obspy.UTCDateTime("2013-04-11 03:42:51.995")
+        st = transcended_bank.get_waveforms(starttime=t1, station="OSS")
+        assert isinstance(st, obspy.Stream)
+        assert len(st)
+
+    def test_get_waveforms_bulk(self, transcended_bank):
+        """Ensure bulk parameters don't choke bank. """
+        t1 = obspy.UTCDateTime("2013-04-11 03:42:51.995")
+        t2 = obspy.UTCDateTime("2013-04-11 03:44:01.985")
+        bulk = [("UU", "OSS", "01", "ENZ", t1, t2)]
+
+        out = transcended_bank.get_waveforms_bulk(bulk)
+        assert isinstance(out, obspy.Stream)
+        assert len(out) == 1
 
     def test_str_rep(self, transcended_bank):
         """ Ensure the transcended bank works. """

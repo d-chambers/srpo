@@ -11,7 +11,7 @@ concurrent writes to HDF5 files as implemented by
 ```python
 import srpo
 
-# define an object we want to share between processes (a dict) and "transcend" it,
+# Define an object we want to share between processes (a dict) and "transcend" it,
 # meaning it is transfer to its own process. A proxy is returned. 
 proxy1 = srpo.transcend({'shared': 2}, 'obj')
 

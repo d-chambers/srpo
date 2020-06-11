@@ -29,6 +29,13 @@ def transcended_dict():
     terminate(name)
 
 
+@pytest.fixture(scope="class")
+def transcended_simple_namespace():
+    ns = SimpleNamespace(bob=2)
+    with transcend(ns, "bob") as tns:
+        yield tns
+
+
 class TestSimpleDict:
     """ Test the basic attributes of Transcended dictionary. """
 
@@ -53,12 +60,6 @@ class TestSimpleDict:
 class TestSetAttr:
     """ Class for setting and fetching remote attrs """
 
-    @pytest.fixture(scope="class")
-    def transcended_simple_namespace(self):
-        ns = SimpleNamespace(bob=2)
-        with transcend(ns, "bob") as tns:
-            yield tns
-
     def test_get_attr(self, transcended_simple_namespace):
         """ ensure we can get the expected attrs. """
         assert transcended_simple_namespace.bob == 2
@@ -74,6 +75,20 @@ class TestSetAttr:
         transcended_simple_namespace.new_attr = True
         assert hasattr(transcended_simple_namespace, "new_attr")
         assert transcended_simple_namespace.new_attr is True
+
+
+class TestGetAttr:
+    """Ensure getattr works."""
+
+    def test_get_attr_exists(self, transcended_simple_namespace):
+        """Test the transcended dict attributes."""
+        out = transcended_simple_namespace.bob
+        assert out == 2
+
+    def test_bad_attr_raises(self, transcended_simple_namespace):
+        """Ensure bad attributes raise."""
+        with pytest.raises(AttributeError):
+            _ = transcended_simple_namespace.not_bob
 
 
 class TestOneProcessOneThread:

@@ -19,6 +19,9 @@ from srpo.exceptions import SrpoConnectionError
 
 # enable pickling in rpyc, 'cause living on the edge is the only way to live
 rpyc.core.protocol.DEFAULT_CONFIG["allow_pickle"] = True
+rpyc.core.protocol.DEFAULT_CONFIG["allow_all_attrs"] = True
+rpyc.core.protocol.DEFAULT_CONFIG["allow_public_attrs"] = True
+rpyc.core.protocol.DEFAULT_CONFIG["propagate_KeyboardInterrupt_locally"] = True
 
 # State for where the simple registry is found
 _REGISTRY_STATE = dict(
@@ -28,6 +31,32 @@ _REGISTRY_STATE = dict(
 
 
 # --- Service and proxy wrapper
+
+
+def _maybe_unwrap_value(value, cls):
+    """ If the object is the same type as self, return it, else try to
+    to unwrap it. """
+
+    if cls is not None and isinstance(value, cls):
+        return value
+    # else try to pickle and de-pickle return object to get rid of netref.
+    try:
+        return obtain(value)
+    except Exception:  # cant pickle this whatever it is, just return
+        return value
+
+
+def _unpack_input_outputs(self, name, doc):
+    """Method to generate methods which simply pass arguments to proxy obj """
+
+    def _func(self, *args, **kwargs):
+        args = _maybe_unwrap_value(args, None)
+        kwargs = _maybe_unwrap_value(kwargs, None)
+        value = getattr(self.obj, name)(*args, **kwargs)
+        return _maybe_unwrap_value(value, type(self))
+
+    setattr(_func, "__doc__", doc)
+    return _func
 
 
 class PassThrough:
@@ -77,32 +106,11 @@ class SrpoProxy(PassThrough):
         self.obj.register_proxy(self._proxy_id)
         # give instances all methods of object
         for name, doc in self.obj.methods.items():
-            setattr(self, name, self._generate_wrap_method(name, doc))
-
-    def _generate_wrap_method(self, name, doc):
-        """ method to generate methods which simply pass arguments to proxy obj """
-
-        def _func(*args, **kwargs):
-            value = getattr(self.obj, name)(*args, **kwargs)
-            return self._maybe_unwrap_value(value)
-
-        setattr(_func, "__doc__", doc)
-        return _func
-
-    def _maybe_unwrap_value(self, value):
-        """ If the object is the same type as self, return it, else try to
-        to unwrap it. """
-
-        if isinstance(value, type(self.obj)):
-            return value
-        # else try to pickle and de-pickle return object to get rid of netref.
-        try:
-            return obtain(value)
-        except Exception:  # cant pickle this whatever it is, just return
-            return value
+            wrap = _unpack_input_outputs(self, name, doc)
+            setattr(self, name, wrap.__get__(self, type(self)))
 
     def __getattr__(self, item):
-        return self._maybe_unwrap_value(getattr(self.obj, item))
+        return _maybe_unwrap_value(getattr(self.obj, item), type(self))
 
     def __del__(self):
         with suppress(Exception):
@@ -137,6 +145,13 @@ def _create_srpo_service(object, server_name, registry_path=None):
         }
         attrs = set(obj_dir) - set(methods)
 
+        def __init__(self):
+            # wrap all methods with packers/unpackers
+            for name, doc in self.methods.items():
+                wrap = _unpack_input_outputs(self, name, doc)
+                setattr(self, name, wrap.__get__(self, type(self)))
+            super(ProxyService, self).__init__()
+
         def on_connect(self, conn):
             # register the proxy
             pass
@@ -170,6 +185,7 @@ def _create_srpo_service(object, server_name, registry_path=None):
         @property
         def public_methods(self):
             """ Return a tuple of object attributes. """
+
             return tuple(x for x in dir(self.obj) if not x.startswith("_"))
 
     return ProxyService
@@ -227,10 +243,12 @@ def transcend(
         service = _create_srpo_service(obj, name, registry_path=registry_path)
         # set new process group
 
+        protocol = dict(allow_all_attrs=True)
+
         kwargs = dict(
             hostname="localhost",
             nbThreads=server_threads,
-            protocol_config=dict(allow_public_attrs=True),
+            protocol_config=protocol,
             port=port,
         )
 
@@ -253,7 +271,7 @@ def transcend(
         proc = multiprocessing.Process(target=_remote, daemon=daemon)
         proc.start()
         # give the server a bit of time to start before releasing control
-        for _ in range(20):
+        for _ in range(100):
             if name in server_registry:
                 return get_proxy(name)
             time.sleep(0.1)
@@ -277,27 +295,28 @@ def terminate(name: str, registry_path: Optional[Path] = None) -> None:
         The path to the simple sqlitedict used to register IPs and ports.
     """
     server_registry = get_registry(registry_path)
+    registry_path = registry_path or server_registry.filename
     if name not in server_registry:
         return
+    # be nice and tell the process to shutdown
+    with suppress(Exception):
+        get_proxy(name).shutdown()
+        time.sleep(0.01)
     # get process id and kill process
     pid = server_registry[name][-1]
     with suppress((psutil.NoSuchProcess, psutil.AccessDenied)):
         psutil.Process(pid).terminate()
-    # remove name from registry
+    # remove name from registry and unlink if empty
     server_registry.pop(name, None)
+    if not server_registry:
+        Path(registry_path).unlink()
 
 
 def terminate_all(registry_path: Optional[Path] = None):
     """ Terminate all processes in a registry. """
-    registry = get_registry(registry_path)
+    registry = dict(get_registry(registry_path))
     for key in registry:
-        try:
-            proxy = get_proxy(key)
-        except Exception:
-            continue
-        proxy.shutdown()
-    if registry_path:
-        Path(registry_path).unlink()
+        terminate(key, registry_path=registry_path)
 
 
 def get_proxy(name: str, registry_path: Optional[str] = None) -> SrpoProxy:

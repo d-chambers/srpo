@@ -5,8 +5,9 @@ pytest configuration for srpo
 from pathlib import Path
 
 import pytest
+import rpyc
 
-from srpo.core import set_registry_path, terminate_all
+from srpo.core import set_registry_path, terminate_all, get_registry
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -24,3 +25,15 @@ def switch_resgistry_path(tmp_path_factory):
     # remove any registry
     if path.exists():
         path.unlink()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def configure_rpyc_for_testing():
+    """Setup rpyc defaults to be a bit more friendly for debugging/testsing."""
+    rpyc.core.protocol.DEFAULT_CONFIG["sync_request_timeout"] = 300
+
+
+@pytest.fixture(scope="session")
+def registry_path():
+    """Get the current registry path"""
+    return get_registry().filename
