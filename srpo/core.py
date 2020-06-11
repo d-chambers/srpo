@@ -279,6 +279,7 @@ def transcend(
         _remote()
 
     # the name should be in the remote server now
+    server_registry = get_registry(registry_path)
     assert name in server_registry
     return get_proxy(name)
 
