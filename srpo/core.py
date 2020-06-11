@@ -269,7 +269,10 @@ def transcend(
 
     if remote:  # launch other process to run server
         proc = multiprocessing.Process(target=_remote, daemon=daemon)
+        # this is a dirty hack to let the process live after script exists
         proc.__del__ = lambda: None
+        proc.join = lambda *args, **kwargs: None
+        # start process
         proc.start()
         # give the server a bit of time to start before releasing control
         for _ in range(100):
