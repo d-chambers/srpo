@@ -262,8 +262,8 @@ def transcend(
         registery = SqliteDict(**sql_kwargs)
         registery[name] = (server.host, server.port, os.getpid())
         registery.commit()
+        # get a new new view of registry, make sure name is there
         assert name in SqliteDict(**sql_kwargs)
-        #
         service._server = server
         server.start()
 
