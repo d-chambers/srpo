@@ -269,6 +269,7 @@ def transcend(
 
     if remote:  # launch other process to run server
         proc = multiprocessing.Process(target=_remote, daemon=daemon)
+        proc.__del__ = lambda: None
         proc.start()
         # give the server a bit of time to start before releasing control
         for _ in range(100):
