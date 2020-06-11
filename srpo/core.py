@@ -343,9 +343,9 @@ def get_proxy(name: str, registry_path: Optional[str] = None) -> SrpoProxy:
     # try to connect, register this end of proxy, return proxy
     try:
         connection = rpyc.connect(host, port)
-    except Exception:
+    except Exception as e:
         msg = f"could not connect to server associated with {name}"
-        raise SrpoConnectionError(msg)
+        raise SrpoConnectionError(msg + f"\n server traceback: \n{e}")
 
     return SrpoProxy(connection, name=name)
 
