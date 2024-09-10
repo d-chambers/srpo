@@ -48,7 +48,9 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install ${{ matrix.python-version }}
+        run: |
+          uv venv
+          uv python install ${{ matrix.python-version }}
 
       - name: install srpo
         run: |
