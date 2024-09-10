@@ -34,6 +34,7 @@ class TestBankBasics:
     def test_get_index(self, transcended_bank):
         """Ensure we can read the index."""
         import pandas as pd
+
         df = transcended_bank.read_index()
         assert isinstance(df, pd.DataFrame)
         assert not df.empty

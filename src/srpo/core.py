@@ -12,6 +12,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, ClassVar
 
+import cloudpickle
 import psutil
 import rpyc
 from platformdirs import user_data_dir
@@ -35,6 +36,60 @@ _REGISTRY_STATE = dict(
     default=SRPO_DATA_PATH / ".srpo_registry.sqlite",
     current=SRPO_DATA_PATH / ".srpo_registry.sqlite",
 )
+
+
+class CloudProcess(multiprocessing.Process):
+    """A custom process which uses cloudpickle for processing."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._target = cloudpickle.dumps(
+            self._target
+        )  # Save the target function as bytes, using dill
+
+    def run(self):
+        """Run the process."""
+        if self._target:
+            self._target = cloudpickle.loads(
+                self._target
+            )  # Unpickle the target function before executing
+            self._target(*self._args, **self._kwargs)  # Execute the target function
+
+
+class _RemoteRunner:
+    """A class to run the rpyc server."""
+
+    def __init__(self, obj, name, registry_path, server_threads, server_registry, port):
+        self.name = name
+        self.service = _create_srpo_service(obj, name, registry_path=registry_path)
+        # set new process group
+
+        self.protocol = dict(allow_all_attrs=True)
+
+        self.kwargs = dict(
+            hostname="localhost",
+            nbThreads=server_threads,
+            protocol_config=self.protocol,
+            port=port,
+        )
+
+        self.sql_kwargs = dict(
+            filename=server_registry.filename,
+            tablename=server_registry.tablename,
+            flag="c",
+        )
+
+    def __call__(self):
+        """Code to execute on forked process."""
+        # register new server
+        self.server = ThreadPoolServer(self.service(), **self.kwargs)
+        registry = SqliteDict(**self.sql_kwargs)
+        registry[self.name] = (self.server.host, self.server.port, os.getpid())
+        registry.commit()
+        # get a new view of registry, make sure name is there
+        assert self.name in SqliteDict(**self.sql_kwargs)
+        self.service._server = self.server
+        self.server.start()
 
 
 # --- Service and proxy wrapper
@@ -247,37 +302,12 @@ def transcend(
             terminate(name)
             time.sleep(0.2)
 
-    def _remote():
-        """Code to execute on forked process."""
-        service = _create_srpo_service(obj, name, registry_path=registry_path)
-        # set new process group
-
-        protocol = dict(allow_all_attrs=True)
-
-        kwargs = dict(
-            hostname="localhost",
-            nbThreads=server_threads,
-            protocol_config=protocol,
-            port=port,
-        )
-
-        server = ThreadPoolServer(service(), **kwargs)
-        sql_kwargs = dict(
-            filename=server_registry.filename,
-            tablename=server_registry.tablename,
-            flag="c",
-        )
-        # register new server
-        registery = SqliteDict(**sql_kwargs)
-        registery[name] = (server.host, server.port, os.getpid())
-        registery.commit()
-        # get a new new view of registry, make sure name is there
-        assert name in SqliteDict(**sql_kwargs)
-        service._server = server
-        server.start()
+    _remote = _RemoteRunner(
+        obj, name, registry_path, server_threads, server_registry, port
+    )
 
     if remote:  # launch other process to run server
-        proc = multiprocessing.Process(target=_remote, daemon=daemon)
+        proc = CloudProcess(target=_remote, daemon=daemon)
         # this is a dirty hack to let the process live after script exists
         proc.__del__ = lambda: None
         proc.join = lambda *args, **kwargs: None

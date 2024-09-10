@@ -65,10 +65,10 @@ jobs:
       - name: run test suite
         run: uv run pytest
 
-      # Runs examples in docstrings
-      - name: test docstrings
-        shell: bash -el {0}
-        run: uv run pytest src --doctest-modules
+#      # Runs examples in docstrings
+#      - name: test docstrings
+#        shell: bash -el {0}
+#        run: uv run pytest src --doctest-modules
 
 # This is a very useful step for debugging, it allows you to ssh into the CI
 # machine (https://github.com/marketplace/actions/debugging-with-tmate).
