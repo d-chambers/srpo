@@ -1,12 +1,15 @@
 """
 Tests for the cli
 """
+
 from subprocess import run
 
 import srpo
 
 
 class TestList:
+    """Tests for transcending a list."""
+
     def test_object_appears_in_registry(self, registry_path):
         """Ensure the object appears in the registry."""
         _ = srpo.transcend("bob", name="transcended_bob")
@@ -17,6 +20,8 @@ class TestList:
 
 
 class TestKill:
+    """Tests for killing a process."""
+
     def test_kill_by_name(self, registry_path):
         """Ensure srpo objects can be killed by name."""
         name = "transcended_bill"

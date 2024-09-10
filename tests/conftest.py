@@ -2,17 +2,14 @@
 pytest configuration for srpo
 """
 
-from pathlib import Path
-
 import pytest
 import rpyc
-
-from srpo.core import set_registry_path, terminate_all, get_registry
+from srpo import get_registry, set_registry_path, terminate_all
 
 
 @pytest.fixture(autouse=True, scope="session")
 def switch_resgistry_path(tmp_path_factory):
-    """ Switch the registry path as to not squish other processes. """
+    """Switch the registry path as to not squish other processes."""
     path = tmp_path_factory.getbasetemp() / "srpo_test_registry.sqlite"
     # remove any registry from previous runs
     if path.exists():
