@@ -4,7 +4,6 @@ Tess for using srpo with obsplus' WaveBanke
 
 from pathlib import Path
 
-import pandas as pd
 import pytest
 from srpo import transcend
 
@@ -13,6 +12,7 @@ from srpo import transcend
 def transcended_bank(tmpdir_factory):
     """Transcend a bank server."""
     pytest.importorskip("obsplus")
+    pytest.importorskip("pandas")
     import obsplus
 
     tmpdir = Path(tmpdir_factory.mktemp("bob"))
@@ -33,6 +33,7 @@ class TestBankBasics:
 
     def test_get_index(self, transcended_bank):
         """Ensure we can read the index."""
+        import pandas as pd
         df = transcended_bank.read_index()
         assert isinstance(df, pd.DataFrame)
         assert not df.empty

@@ -32,6 +32,7 @@ classifiers = [
     "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
     "Topic :: Scientific/Engineering",
 ]
+requires-python = ">= 3.10"
 
 [project.optional-dependencies]
 

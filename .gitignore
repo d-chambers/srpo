@@ -71,3 +71,6 @@ target/
 *~
 *.swp
 .DS_store*
+
+# uv stuff
+uv.lock
