@@ -6,10 +6,14 @@ the objects in a synchronous way. It was made for solving problems related to
 concurrent writes to HDF5 files as implemented by 
 [obsplus](www.github.com/niosh-mining/obsplus).
 
+Since srpo uses the pickle protocol, there are potential security implications.
+It is recommended to only use it for inter-process communication on the same machine.
+
 ## Quickstart
 
 ```python
-import srpo
+
+from src import srpo
 
 # Define an object we want to share between processes (a dict) and "transcend" it,
 # meaning it is transfer to its own process. A proxy is returned. 

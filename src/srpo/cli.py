@@ -1,14 +1,14 @@
 """
 SRPOS CLI
 """
-from pprint import pprint
-from typing import Optional
 
-import psutil
+from __future__ import annotations
+
+import rich
 import typer
 
 import srpo
-from srpo.core import terminate, terminate_all
+from srpo import terminate, terminate_all
 
 app = typer.Typer()
 
@@ -19,14 +19,12 @@ def ls(registry_path=None):
     List all the srp processes current registered.
     """
     registry = dict(srpo.get_registry(registry_path=registry_path))
-    print("SRPO registered objects:")
-    pprint(registry)
+    rich.print("SRPO registered objects:")
+    rich.print(registry)
 
 
 @app.command()
-def kill(
-    name: Optional[str] = None, all: bool = False, registry_path: Optional[str] = None
-):
+def kill(name: str | None = None, all: bool = False, registry_path: str | None = None):
     """
     Kill a single srpo project by name or kill all of them.
 
