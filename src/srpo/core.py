@@ -1,6 +1,3 @@
-"""
-Core module of srpo.
-"""
 
 from __future__ import annotations
 
@@ -255,6 +252,14 @@ def _create_srpo_service(object, server_name, registry_path=None):
     return ProxyService
 
 
+def _empty_call():
+    return None
+
+
+def _dummy_join(*args, **kwargs):
+    return None
+
+
 def transcend(
     obj: Any,
     name: str,
@@ -309,8 +314,8 @@ def transcend(
     if remote:  # launch other process to run server
         proc = CloudProcess(target=_remote, daemon=daemon)
         # this is a dirty hack to let the process live after script exists
-        proc.__del__ = lambda: None
-        proc.join = lambda *args, **kwargs: None
+        proc.__del__ = _empty_call
+        proc.join = _dummy_join
         # start process
         proc.start()
         # give the server a bit of time to start before releasing control
@@ -353,7 +358,8 @@ def terminate(name: str, registry_path: Path | None = None) -> None:
     # remove name from registry and unlink if empty
     server_registry.pop(name, None)
     if not server_registry:
-        Path(registry_path).unlink()
+        with suppress(PermissionError):
+            Path(registry_path).unlink()
 
 
 def terminate_all(registry_path: Path | None = None):

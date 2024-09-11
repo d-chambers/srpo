@@ -3,6 +3,7 @@ Tests for the cli
 """
 
 from subprocess import run
+import os
 
 import srpo
 
@@ -12,7 +13,7 @@ class TestList:
 
     def test_object_appears_in_registry(self, registry_path):
         """Ensure the object appears in the registry."""
-        _ = srpo.transcend("bob", name="transcended_bob")
+        _ = srpo.transcend(os, name="transcended_bob")
         cmd = f"srpo ls --registry-path {registry_path}"
         res = run(cmd, shell=True, capture_output=True)
         output_str = res.stdout.decode("utf8").split("\n")[1]

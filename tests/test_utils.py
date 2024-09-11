@@ -3,10 +3,15 @@ Tests for utilities and misc. functionality
 """
 
 import multiprocessing
+from contextlib import suppress
 
 import pytest
 from sqlitedict import SqliteDict
 
+
+class _DummyCommiter:
+    """This class is here to avoid windows pickling issues."""
+    
 
 class TestMultiprocessingSqlLite:
     """tests for multiprocessing use with sqlitedict"""
@@ -17,7 +22,8 @@ class TestMultiprocessingSqlLite:
         path = tmp_path / "temp.sqlite"
         path.parent.mkdir(exist_ok=True, parents=True)
         yield SqliteDict(path)
-        path.unlink()
+        with suppress(PermissionError):
+            path.unlink()
 
     @pytest.fixture
     def sqldict_added_value(self, sqldict):

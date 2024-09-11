@@ -1,6 +1,10 @@
 """
 pytest configuration for srpo
 """
+# This is here for compatibility with pdbpp; it should be harmless.
+import collections
+collections.Callable = collections.abc.Callable
+from contextlib import suppress
 
 import pytest
 import rpyc
@@ -21,7 +25,8 @@ def switch_resgistry_path(tmp_path_factory):
     terminate_all(path)
     # remove any registry
     if path.exists():
-        path.unlink()
+        with suppress(PermissionError):
+            path.unlink()
 
 
 @pytest.fixture(scope="session", autouse=True)
